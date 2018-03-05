@@ -27,11 +27,11 @@ install:
   - source activate dl-jhu-env
   - which python
   - conda list
-  - pip install --upgrade pytest flake8 tensorboardX onnx
+  - pip install --upgrade pytest pytest-pep8 flake8 tensorboardX onnx
   # - python setup.py install
 
 before_script:
-  # - py.test --pep8 -m pep8 -n0;
+  - py.test --pep8 -m pep8 -n0;
 script:
   - py.test p02_fashion_mnist_tests.py
   - python p02_fashion_mnist.py --dataset fashion_mnist
