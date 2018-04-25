@@ -353,7 +353,7 @@ class P3Dropout2d(nn.Module):
         mask_array = np.random.binomial(1, 1 - self.p, size = (input.shape[0], input.shape[1]))
         temp = np.zeros((input.shape[0], input.shape[1], input.shape[2], input.shape[3]))
         temp[(mask_array>0),:,:] = np.ones((input.shape[2], input.shape[3]))
-        return Variable(torch.from_numpy(input.numpy() * temp * (1/(1-self.p))).float())
+        return Variable(torch.from_numpy(input.numpy() * temp).float())
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -645,11 +645,11 @@ class NewNet(nn.Module):
         super(NewNet, self).__init__()
         self.bn_start = nn.BatchNorm2d(1)
         self.conv1 = nn.Conv2d(1, 64, kernel_size=4)
-        self.conv1_do = nn.Dropout2d(p=0.1)
+        self.conv1_do = P3Dropout2d(p=0.1)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=4)
-        self.conv2_do = nn.Dropout2d(p=0.2)
+        self.conv2_do = P3Dropout2d(p=0.2)
         self.fc1 = P3Linear(64 * 22 * 22, 250)
-        self.fc1_do = nn.Dropout(p=0.3)
+        self.fc1_do = P3Dropout(p=0.3)
         self.fc2 = P3Linear(250, 64)
         self.bn_end = nn.BatchNorm2d(64)
         self.fc_end = P3Linear(64, 10)
