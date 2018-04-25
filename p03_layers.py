@@ -8,6 +8,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parameter import Parameter
 import torch.optim as optim
 import torchvision
 from torchvision import datasets
@@ -232,17 +233,31 @@ class P3SGD(optim.Optimizer):
             nesterov = group['nesterov']
 
             for p in group['params']:
-                # TODO Implement me
-                raise NotImplementedError
+                if p.grad is not None:
 
-                # You will also need to use:
-                #
-                # 1. The gradient of the current param
-                #       d_p = p.grad.data
-                # 2. The momentum buffer storing the previous step's momentum
-                #       param_state['momentum_buffer']
-                # 3. The current stored learning rate
-                #       group['lr']
+                    p_data = p.grad.data
+                    if weight_decay != 0:
+                        temp = torch.mul(p.data, weight_decay)
+                        p_data = torch.add(p_data, temp)
+
+                    if momentum != 0:
+                        param_state = self.state[p]
+                        if 'momentum_buffer' not in param_state:
+                            zeros = torch.zeros_like(p.data)
+                            mb = zeros
+                            param_state['momentum_buffer'] = zeros
+                            mb.mul_(momentum).add_(p_data)
+                        else:
+                            mb = param_state['momentum_buffer']
+                            mb.mul_(momentum)
+                            mb.add_(1 - dampening, p_data)
+                        if nesterov:
+                            temp = torch.add(mb, momentum)
+                            p_data = torch.add(p_data, temp)
+                        else:
+                            p_data = mb
+
+            p.data.add_(-group['lr'], p_data)
 
         return loss
 
@@ -275,11 +290,21 @@ class P3Dropout(nn.Module):
     def __init__(self, p=0.5, inplace=False):
         super(P3Dropout, self).__init__()
         # TODO Implement me
-        raise NotImplementedError
+        # Check if p is within bounds
+        if (p < 0 or p > 1):
+            sys.exit("p is out of bounds. Must be between 0 and 1.")
+
+        self.p = p
+        self.inplace = inplace
 
     def forward(self, input):
-        # TODO Implement me
-        raise NotImplementedError
+        if  (self.p == 0):
+            return input
+        input = input.data
+        mask_array = np.random.binomial(1, self.p, size = input.size())
+
+        return Variable(torch.from_numpy(input.numpy() * mask_array * (1/(1-self.p))).float())
+
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -316,11 +341,19 @@ class P3Dropout2d(nn.Module):
 
     def __init__(self, p=0.5, inplace=False):
         super(P3Dropout2d, self).__init__()
-        # TODO Implement me
-        raise NotImplementedError
+        if p < 0 and p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1")
+        self.p = p
+        self.inplace = inplace
 
     def forward(self, input):
-        raise NotImplementedError
+        if  (self.p == 0):
+            return input
+        input = input.data
+        mask_array = np.random.binomial(1, 1 - self.p, size = (input.shape[0], input.shape[1]))
+        temp = np.zeros((input.shape[0], input.shape[1], input.shape[2], input.shape[3]))
+        temp[(mask_array>0),:,:] = np.ones((input.shape[2], input.shape[3]))
+        return Variable(torch.from_numpy(input.numpy() * temp * (1/(1-self.p))).float())
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -337,25 +370,33 @@ def linear(input, weight, bias=None):
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
-    raise NotImplementedError
+    result = input.matmul(weight.t())
+    if bias is not None:
+        return result + bias
+    else:
+        return result
 
 
 class P3LinearFunction(torch.autograd.Function):
     """See P3Linear for details.
     """
 
-    def forward(self, input):
-        # TODO Implement me
-        raise NotImplementedError
+    def forward(self, input, weight, bias=None):
+        self.save_for_backward(input, weight, bias)
+        return linear(input, weight, bias)
 
     def backward(self, grad_output):
-        """
-        In the backward pass we receive a Tensor containing the gradient of the loss
-        with respect to the output, and we need to compute the gradient of the loss
-        with respect to the input.
-        """
-        # TODO manually implement a backwards pass
-        raise NotImplementedError
+        input, weight, bias = self.saved_tensors
+
+        grad_input = None
+        grad_weight = None
+        grad_bias = None
+
+        grad_input = grad_output.matmul(weight)
+        grad_weight = grad_output.t().matmul(input)
+        grad_bias = grad_output.sum(0).squeeze(0)
+
+        return grad_input, grad_weight, grad_bias
 
 
 class P3Linear(nn.Module):
@@ -383,7 +424,15 @@ class P3Linear(nn.Module):
 
     def __init__(self, in_features, out_features, bias=True):
         super(P3Linear, self).__init__()
-        raise NotImplementedError
+        # TODO Implement me
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        if (bias == True):
+            self.bias = Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
@@ -392,8 +441,8 @@ class P3Linear(nn.Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        # TODO Implement me
-        raise NotImplementedError
+        model = P3LinearFunction()
+        return model(input, self.weight, self.bias)
 
     def __repr__(self):
         return (self.__class__.__name__ + '(' +
@@ -408,11 +457,15 @@ def p3relu(input, inplace=False):
     :math:`\text{ReLU}(x)= \max(0, x)`
     .. image:: _static/img/activation/ReLU.png
     Args:
+        input: torch.Tensor
         inplace: can optionally do the operation in-place. Default: ``False``
     """
-    # TODO Implement me
-    raise NotImplementedError
 
+    if inplace:
+        input.mul_((input > 0).type(type(input.data))).abs_()
+        return None
+    else:
+        return input.clamp(min=0)
 
 class P3ReLU(nn.Module):
     r"""Applies the rectified linear unit function element-wise
@@ -432,11 +485,11 @@ class P3ReLU(nn.Module):
 
     def __init__(self, inplace=False):
         super(P3ReLU, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input):
-        # TODO Implement me
-        raise NotImplementedError
-
+        return p3relu(input, self.inplace)
+        
     def __repr__(self):
         inplace_str = 'inplace' if self.inplace else ''
         return self.__class__.__name__ + '(' \
@@ -459,19 +512,23 @@ class P3ELUFunction(torch.autograd.Function):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
-
-    def forward(self, input):
-        raise NotImplementedError
+    def forward(self, input, alpha=torch.Tensor([1]), inplace=torch.Tensor([False])):
+        self.save_for_backward(input, alpha, inplace)
+        if inplace[0] == 1:
+            min_part = (input.exp().add(-1).mul(alpha[0])) * (input.exp().add(-1).mul(alpha[0]) < 0).type(type(input))
+            input.mul_((input > 0).type(type(input))).abs_()
+            input.add_(min_part)
+            return None
+        else:
+            max_part = input.clamp(min=0)
+            min_part = (input.exp().add(-1).mul(alpha[0])) * (input.exp().add(-1).mul(alpha[0]) < 0).type(type(input))
+            return max_part.add(min_part)
 
     def backward(self, grad_output):
-        """
-        In the backward pass we receive a Tensor containing the gradient of the loss
-        with respect to the output, and we need to compute the gradient of the loss
-        with respect to the input.
-        """
-        # TODO manually implement a backwards pass
-        raise NotImplementedError
-
+        input, alpha, inplace = self.saved_tensors
+        grad_input = grad_output.clone()
+        grad_input[input < 0].mul_(((input.exp().mul(alpha)))[input < 0])
+        return grad_input
 
 class P3ELU(nn.Module):
     r"""Applies element-wise,
@@ -496,7 +553,11 @@ class P3ELU(nn.Module):
         self.inplace = inplace
 
     def forward(self, input):
-        raise NotImplementedError
+        model = P3ELUFunction()
+        if self.inplace:
+            model(input, Variable(torch.Tensor([self.alpha])), Variable(torch.Tensor([self.inplace])))
+        else:
+            return model(input, Variable(torch.Tensor([self.alpha])), Variable(torch.Tensor([self.inplace])))
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -553,7 +614,8 @@ class P3BCELoss(_WeightedLoss):
     def forward(self, input, target):
         _assert_no_grad(target)
         # TODO implement me
-        raise NotImplementedError
+        # Convert to numpy for calculation
+        
 
 # Define the neural network classes
 
@@ -563,20 +625,43 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
+        self.fc1 = P3Linear(320, 50)
+        self.fc2 = P3Linear(50, 10)
 
     def forward(self, x):
         # F is just a functional wrapper for modules from the nn package
         # see http://pytorch.org/docs/_modules/torch/nn/functional.html
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = p3relu(F.max_pool2d(self.conv1(x), 2))
+        x = p3relu(F.max_pool2d(self.conv2(x), 2))
         x = x.view(-1, 320)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
+        x = p3relu(self.fc1(x))
+        m_dropout = P3Dropout()
+        x = m_dropout(x)
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
 
+class NewNet(nn.Module):
+    def __init__(self):
+        super(NewNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        self.conv3 = nn.Conv2d(20, 40, kernel_size=5)
+        self.fc1 = P3Linear(40 * 4 * 4 * 4, 50)
+        self.fc2 = P3Linear(50, 10)
+        self.m_dropout = P3Dropout()
+
+    def forward(self, x):
+        # F is just a functional wrapper for modules from the nn package
+        # see http://pytorch.org/docs/_modules/torch/nn/functional.html
+        x = p3relu(F.max_pool2d(self.conv1(x), 1))
+        x = p3relu(F.max_pool2d(self.conv2(x), 1))
+        x = p3relu(F.max_pool2d(self.conv3(x), 2))
+        x = x.view(-1, 40 * 4 * 4 * 4)
+        x = p3relu(self.fc1(x))
+        x = self.m_dropout(x)
+        x = self.fc2(x)
+        x = p3relu(x)
+        return F.log_softmax(x, dim=1)
 
 def chooseModel(model_name='default', cuda=True):
     # TODO add all the other models here if their parameter is specified
@@ -651,7 +736,7 @@ def train(model, optimizer, train_loader, tensorboard_writer, callbacklist, epoc
             for name, param in model.named_parameters():
                 name = name.replace('.', '/')
                 tensorboard_writer.add_histogram(name, param.data.cpu().numpy(), global_step=total_minibatch_count)
-                tensorboard_writer.add_histogram(name + '/gradient', param.grad.data.cpu().numpy(), global_step=total_minibatch_count)
+                # tensorboard_writer.add_histogram(name + '/gradient', param.grad.data.cpu().numpy(), global_step=total_minibatch_count)
 
         total_minibatch_count += 1
 

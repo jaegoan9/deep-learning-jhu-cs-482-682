@@ -3,6 +3,7 @@ import unittest
 import functools
 from copy import deepcopy
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torch.legacy.optim as old_optim
 import torch.nn.functional as F
@@ -10,6 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from test_common import TestCase, run_tests
+import numpy as np
 import p03_layers
 
 
@@ -264,6 +266,195 @@ class TestOptim(TestCase):
         except NotImplementedError:
             pass
 
+class TestReluFunction(TestCase):
+
+    def test_p3relu_function(self):
+
+        #test general case
+        relu_input = Variable(torch.Tensor(np.array([[1, 2, 3], [4, -5, 6]])))
+        expected = Variable(torch.Tensor(np.array([[1, 2, 3], [4, 0, 6]])))
+
+        self.assertNotEqual(relu_input, expected)
+        self.assertEqual(p03_layers.p3relu(relu_input, False), expected)
+
+        input2 = Variable(torch.Tensor(np.array([[-1, -1, -1], [-1, -5, -1]])))
+        expected2 = Variable(torch.Tensor(np.array([[0, 0, 0], [0, 0, 0]])))
+
+        self.assertNotEqual(input2, expected2)
+        self.assertEqual(p03_layers.p3relu(input2), expected2)
+
+        #inplace test
+        p03_layers.p3relu(input2, False)
+        self.assertNotEqual(input2, expected2)
+        p03_layers.p3relu(input2, True)
+        self.assertEqual(input2, expected2) 
+
+class TestDropoutFunction(TestCase):
+
+    def test_P3Dropout(self):
+        # Test for when p > 1
+        p_greater_than_1 = 1.5
+        with self.assertRaises(ValueError):
+            p03_layers.P3Dropout(p_greater_than_1, False)
+            p03_layers.P3Dropout(p_greater_than_1, True)
+
+        # Test for when p < 0
+        p_less_than_0 = - 0.5
+        with self.assertRaises(ValueError):
+            p03_layers.P3Dropout(p_less_than_0, False)
+            p03_layers.P3Dropout(p_less_than_0, True)
+
+        # Test for p = 0.5
+        dropout_input = torch.Tensor(np.array([[1, 2, 3], [4, -5, 6]]))
+        expected = 0.5 * (dropout_input.size(0) * dropout_input.size(1)) # Number of zeros if p = 0.5 (p * length)
+
+        for i in range (30):
+            m = p03_layers.P3Dropout(0.5, False)
+            # Expected number of zeros is greater than custom lower bound
+            self.assertGreaterEqual(6 - (torch.nonzero(m(dropout_input)).size(0)), int(expected - 2))
+            # Expected number of zeros is smaller than custom upper bound
+            self.assertLessEqual(6 - (torch.nonzero(m(dropout_input)).size(0)), int(expected + 2))
+
+class TestDropout2dFunction(TestCase):
+
+    def test_P3Dropout2d(self):
+        # Test for when p > 1
+        p_greater_than_1 = 1.5
+        with self.assertRaises(ValueError):
+            p03_layers.P3Dropout(p_greater_than_1, False)
+            p03_layers.P3Dropout(p_greater_than_1, True)
+
+        # Test for when p < 0
+        p_less_than_0 = - 0.5
+        with self.assertRaises(ValueError):
+            p03_layers.P3Dropout(p_less_than_0, False)
+            p03_layers.P3Dropout(p_less_than_0, True)
+
+        # Test for p = 0.5
+        # We cannot exactly test since we always get random values
+        # However, we can see if we are in fair range of the expected value
+        # over a few loops.
+
+        # Test for p = 0.5
+        dropout2d_input = torch.randn(20, 16, 32, 32)
+        prob = 0.5
+        expected = prob * (dropout2d_input.size(0) * dropout2d_input.size(1)) # Number of zeros if p = 0.5 (p * length)
+        # should get around 160, 32 x 32 channels zeroed out
+        m = p03_layers.P3Dropout2d(prob, False)
+        dropout_result = m(dropout2d_input)
+
+        dropout2d_counter = 0
+        for i in range(dropout2d_input.size(0)):
+            for j in range(dropout2d_input.size(1)):
+                # If channel is all zeroed out
+                if (not np.count_nonzero(dropout_result[i][j].numpy())):
+                    dropout2d_counter += 1
+        # Check if number of zeroed out channels are within reasonable range
+        self.assertGreaterEqual(dropout2d_counter, expected - 50)
+        self.assertLessEqual(dropout2d_counter, expected + 50)
+
+
+class TestReluClass(TestCase):
+
+    def test_p3relu_class(self):
+        #test general case
+        relu_input = Variable(torch.Tensor(np.array([[1, 2, 3], [4, -5, 6]])))
+        expected = Variable(torch.Tensor(np.array([[1, 2, 3], [4, 0, 6]])))
+        m = p03_layers.P3ReLU()
+
+        self.assertNotEqual(relu_input, expected)
+        self.assertEqual(m(relu_input), expected)
+
+        input2 = Variable(torch.Tensor(np.array([[-1, -1, -1], [-1, -5, -1]])))
+        expected2 = Variable(torch.Tensor(np.array([[0, 0, 0], [0, 0, 0]])))
+
+        self.assertNotEqual(input2, expected2)
+        self.assertEqual(m(input2), expected2)
+
+        #inplace test
+        m = p03_layers.P3ReLU(True)
+        self.assertNotEqual(input2, expected2)
+        m(input2)
+        self.assertEqual(input2, expected2) 
+
+class TestLinearClass(TestCase):
+
+    def test_p3linear(self):
+        #General Test for working
+        model = p03_layers.P3Linear(20,30)
+        test_input = Variable(torch.randn(128, 20))
+        output = model(test_input)
+        m, n = output.shape
+
+        self.assertNotEqual(output, test_input)
+        self.assertEqual(m, 128)
+        self.assertEqual(n , 30)
+
+        #compare result with pytorch module Linear
+        pytorch_model = nn.Linear(20,30)
+        d = pytorch_model.state_dict()
+        model_weight = Variable(d['weight'])
+        model_bias = Variable(d['bias'])
+        linear_model = p03_layers.P3LinearFunction()
+
+        pytorch_model_output = pytorch_model(test_input)
+        m_linear_model_output = linear_model(test_input, model_weight, model_bias)
+        self.assertEqual(pytorch_model_output.shape, m_linear_model_output.shape)
+        self.assertEqual(pytorch_model_output, m_linear_model_output)
+
+        #check bias works or not
+        m_linear_model_output = linear_model(test_input, model_weight)
+        self.assertNotEqual(pytorch_model_output, m_linear_model_output)
+
+        #model without bias
+        test_input = Variable(torch.randn(128, 20))
+        pytorch_model = nn.Linear(20, 10, bias=False)
+        model_weight = Variable(pytorch_model.weight.data)
+        linear_model = p03_layers.P3LinearFunction()
+
+        pytorch_model_output = pytorch_model(test_input)
+        m_linear_model_output = linear_model(test_input, model_weight)
+        self.assertEqual(pytorch_model_output.shape, m_linear_model_output.shape)
+        self.assertEqual(pytorch_model_output, m_linear_model_output)
+
+class TestELUClass(TestCase):
+
+    def test_p3elu(self):
+        #General working test
+        m = p03_layers.P3ELU()
+        test_input = Variable(torch.randn(5,5))
+        output = m(test_input)
+
+        self.assertNotEqual(test_input, output)
+
+        #compare result with torch module
+        torch_module = nn.ELU()
+        torch_ouput = torch_module(test_input)
+        self.assertEqual(output.shape, torch_ouput.shape)
+        self.assertEqual(output, torch_ouput)
+
+        #different alpha size
+        m = p03_layers.P3ELU(alpha=2, inplace=False)
+        output = m(test_input)
+        torch_module = nn.ELU(alpha=2, inplace=False)
+        torch_ouput = torch_module(test_input)
+        self.assertEqual(output.shape, torch_ouput.shape)
+        self.assertEqual(output, torch_ouput)
+
+        #different large test input
+        test_input = Variable(torch.randn(128,128))
+        m = p03_layers.P3ELU(alpha=2, inplace=False)
+        output = m(test_input)
+        torch_module = nn.ELU(alpha=2, inplace=False)
+        torch_ouput = torch_module(test_input)
+        self.assertEqual(output.shape, torch_ouput.shape)
+        self.assertEqual(output, torch_ouput)
+
+        # inplace parameter check
+        # m = p03_layers.P3ELU(alpha=2, inplace=True)
+        # output = m(test_input)
+        # self.assertEqual(output.shape, torch_ouput.shape)
+        # self.assertEqual(output, torch_ouput)
 
 def check_net(model):
     model.train()
@@ -280,44 +471,36 @@ def check_net(model):
     loss.backward()
     optimizer.step()
 
-
 def test_nets():
     model = p03_layers.Net()
     check_net(model)
-
 
 def test_sgd():
     return TestOptim
 
 
 def test_p3dropout():
-    # TODO Implement me
-    pass
+    return TestDropoutFunction
 
 
 def test_p3dropout2d():
-    # TODO Implement me
-    pass
+    return TestDropout2dFunction
 
 
 def test_p3linear():
-    # TODO Implement me
-    pass
+    return TestLinearClass
 
 
 def test_p3relu_function():
-    # TODO Implement me
-    pass
+    return TestReluFunction
 
 
 def test_p3relu_class():
-    # TODO Implement me
-    pass
+    return TestReluClass
 
 
 def test_p3elu():
-    # TODO Implement me
-    pass
+    return TestELUClass
 
 
 def test_p3bce_loss():
