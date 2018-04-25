@@ -643,24 +643,29 @@ class Net(nn.Module):
 class NewNet(nn.Module):
     def __init__(self):
         super(NewNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv3 = nn.Conv2d(20, 40, kernel_size=5)
-        self.conv2_drop = P3Dropout2d()
-        self.fc1 = P3Linear(40 * 4 * 4 * 4, 50)
-        self.fc2 = P3Linear(50, 10)
-        self.m_dropout = P3Dropout()
+        self.bn_start = nn.BatchNorm2d(1)
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=4)
+        self.conv1_do = P3Dropout2d(p=0.1)
+        self.conv2 = nn.Conv2d(64, 64, kernel_size=4)
+        self.conv2_do = P3Dropout2d(p=0.2)
+        self.fc1 = P3Linear(64 * 22 * 22, 250)
+        self.fc1_do = P3Dropout(p=0.3)
+        self.fc2 = P3Linear(250, 64)
+        self.bn_end = nn.BatchNorm2d(64)
+        self.fc_end = P3Linear(64, 10)
 
     def forward(self, x):
         # F is just a functional wrapper for modules from the nn package
         # see http://pytorch.org/docs/_modules/torch/nn/functional.html
-        x = p3relu(F.max_pool2d(self.conv1(x), 1))
-        x = p3relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 1))
-        x = p3relu(F.max_pool2d(self.conv3(x), 2))
-        x = x.view(-1, 40 * 4 * 4 * 4)
-        x = p3relu(self.fc1(x))
-        x = self.m_dropout(x)
-        x = self.fc2(x)
+        x = self.bn_start(x)
+        x = self.conv1_do(F.max_pool2d(F.relu(self.conv1(x)), 1))
+        x = self.conv2_do(F.max_pool2d(F.relu(self.conv2(x)), 1))
+        x = x.view(-1, 64 * 22 * 22)
+        x = self.fc1_do(F.relu(self.fc1(x)))
+        x = F.relu(self.fc2(x))
+        x = self.bn_end(x)
+        x = self.fc_end(x)
+
         return F.log_softmax(x, dim=1)
 
 def chooseModel(model_name='default', cuda=True):
