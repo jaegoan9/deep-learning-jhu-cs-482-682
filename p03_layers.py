@@ -646,6 +646,7 @@ class NewNet(nn.Module):
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
         self.conv3 = nn.Conv2d(20, 40, kernel_size=5)
+        self.conv2_drop = P3Dropout2d()
         self.fc1 = P3Linear(40 * 4 * 4 * 4, 50)
         self.fc2 = P3Linear(50, 10)
         self.m_dropout = P3Dropout()
@@ -654,13 +655,12 @@ class NewNet(nn.Module):
         # F is just a functional wrapper for modules from the nn package
         # see http://pytorch.org/docs/_modules/torch/nn/functional.html
         x = p3relu(F.max_pool2d(self.conv1(x), 1))
-        x = p3relu(F.max_pool2d(self.conv2(x), 1))
+        x = p3relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 1))
         x = p3relu(F.max_pool2d(self.conv3(x), 2))
         x = x.view(-1, 40 * 4 * 4 * 4)
         x = p3relu(self.fc1(x))
         x = self.m_dropout(x)
         x = self.fc2(x)
-        x = p3relu(x)
         return F.log_softmax(x, dim=1)
 
 def chooseModel(model_name='default', cuda=True):
