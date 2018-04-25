@@ -649,7 +649,7 @@ class NewNet(nn.Module):
         self.conv2 = nn.Conv2d(64, 64, kernel_size=4)
         self.conv2_do = P3Dropout2d(p=0.2)
         self.fc1 = P3Linear(64 * 22 * 22, 250)
-        self.fc1_do = P3Dropout(p=0.3)
+        self.fc1_do = nn.Dropout(p=0.3)
         self.fc2 = P3Linear(250, 64)
         self.bn_end = nn.BatchNorm2d(64)
         self.fc_end = P3Linear(64, 10)
